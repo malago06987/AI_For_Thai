@@ -1,0 +1,9 @@
+# Core Dependencies
+opencv-python>=4.8.0.76
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# UI & Audio Enhancements
+pillow>=10.0.0
+pygame>=2.5.0
+flask>=3.0.0
