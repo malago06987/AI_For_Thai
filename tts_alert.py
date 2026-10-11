@@ -43,8 +43,10 @@ class VajaAlertService:
         self._is_playing = False
         self._last_alert_time = 0.0
 
-        # ชื่อไฟล์แคชสำหรับเสียงเตือนนี้โดยเฉพาะ
-        self._cached_audio_path = self.cache_dir / f"vaja_{self.speaker}_alert.wav"
+        # ใช้ hash ของข้อความในชื่อไฟล์ เพื่อให้เปลี่ยนข้อความใน .env แล้วดึงเสียงใหม่จาก API ทันที
+        import hashlib
+        text_hash = hashlib.md5(self.text.encode("utf-8")).hexdigest()[:8]
+        self._cached_audio_path = self.cache_dir / f"vaja_{self.speaker}_{text_hash}.wav"
 
         # เตรียม pygame.mixer
         self._init_pygame_mixer()

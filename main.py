@@ -77,7 +77,7 @@ class FaceMaskDetectionApp:
 
                     # ถ้าผลลัพธ์เป็น Mask ให้แจ้งเตือนด้วยเสียง VAJA
                     if result.get("should_alert"):
-                        logger.warning("ตรวจพบหน้ากากอนามัย! สั่งเล่นเสียงแจ้งเตือน: 'กรุณาถอดหน้ากาก'")
+                        logger.warning("ตรวจพบหน้ากากอนามัย! สั่งเล่นเสียงแจ้งเตือน: 'ถอดหน้ากากออกด้วยดิวะ'")
                         self.alert_service.trigger_alert_async()
                     else:
                         logger.info("ผลลัพธ์เป็น NoMask หรือไม่พบหน้ากาก -> ไม่ต้องแจ้งเตือน")

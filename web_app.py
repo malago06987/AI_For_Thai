@@ -174,7 +174,7 @@ def trigger_api_check(frame_to_check: np.ndarray):
                     # ถ้าผลเป็น Mask ให้แจ้งเตือนด้วยเสียง VAJA
                     if result.get("should_alert"):
                         state["mask_count"] += 1
-                        logger.warning("ตรวจพบหน้ากากอนามัย! สั่งเล่นเสียงเตือน VAJA: 'กรุณาถอดหน้ากาก'")
+                        logger.warning("ตรวจพบหน้ากากอนามัย! สั่งเล่นเสียงเตือน VAJA: 'ถอดหน้ากากออกด้วยดิวะ'")
                         alert_service.trigger_alert_async()
                     else:
                         logger.info("ผลลัพธ์เป็น NoMask (ไม่ใส่หน้ากาก) -> ไม่ต้องแจ้งเตือน")
@@ -275,7 +275,7 @@ HTML_TEMPLATE = """
                     </button>
                 </div>
                 <div id="audio-alert-banner" class="hidden text-sm font-semibold text-rose-400 animate-bounce">
-                    📢 กำลังส่งเสียงเตือน: "กรุณาถอดหน้ากาก"
+                    📢 กำลังส่งเสียงเตือน: "ถอดหน้ากากออกด้วยดิวะ"
                 </div>
             </div>
         </section>

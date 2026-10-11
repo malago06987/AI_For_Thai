@@ -125,7 +125,7 @@ def draw_detection_hud(
     # กำหนดชุดสีตามสถานะ (BGR)
     if status == "Mask":
         theme_color = (0, 0, 230)      # สีแดง (เตือนใส่หน้ากาก)
-        status_text = "เตือน: ตรวจพบหน้ากากอนามัย (กรุณาถอดหน้ากาก)"
+        status_text = "เตือน: ตรวจพบหน้ากากอนามัย (ถอดหน้ากากออกด้วยดิวะ)"
         sub_text = "STATUS: MASK DETECTED"
         cv2.rectangle(frame, (0, 0), (w, h), theme_color, 8)
     elif status == "NoMask":

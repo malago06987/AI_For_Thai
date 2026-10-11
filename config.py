@@ -27,7 +27,7 @@ class Config:
         "VAJA_TTS_URL", "https://api.aiforthai.in.th/vaja"
     ).strip()
     VAJA_SPEAKER = os.getenv("VAJA_SPEAKER", "nana").strip()
-    VAJA_TEXT = os.getenv("VAJA_TEXT", "กรุณาถอดหน้ากาก").strip()
+    VAJA_TEXT = os.getenv("VAJA_TEXT", "ถอดหน้ากากออกด้วยดิวะ").strip()
 
     # Hardware & Performance
     CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
