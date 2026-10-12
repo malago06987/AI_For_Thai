@@ -29,6 +29,20 @@ class Config:
     VAJA_SPEAKER = os.getenv("VAJA_SPEAKER", "nana").strip()
     VAJA_TEXT = os.getenv("VAJA_TEXT", "ถอดหน้ากากออกด้วยดิวะ").strip()
 
+    # Thai LLM Configuration (ThaiLLM Playground & Providers)
+    THAILLM_API_KEY = os.getenv("THAILLM_API_KEY", "").strip()
+    THAILLM_API_URL = os.getenv(
+        "THAILLM_API_URL", "https://api.thaillm.or.th/v1/chat/completions"
+    ).strip()
+    THAILLM_MODEL = os.getenv("THAILLM_MODEL", "Typhoon-S-ThaiLLM-8B-Instruct").strip()
+    THAI_LLM_PROVIDER = os.getenv("THAI_LLM_PROVIDER", "auto").strip()
+    THAI_LLM_PERSONA = os.getenv("THAI_LLM_PERSONA", "funny").strip()
+    ENABLE_DYNAMIC_LLM_ALERT = (
+        os.getenv("ENABLE_DYNAMIC_LLM_ALERT", "true").lower() in ("true", "1", "yes")
+    )
+    TYPHOON_API_KEY = os.getenv("TYPHOON_API_KEY", "").strip()
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+
     # Hardware & Performance
     CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
     FRAME_WIDTH = int(os.getenv("FRAME_WIDTH", "1280"))

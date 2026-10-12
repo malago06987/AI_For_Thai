@@ -116,6 +116,7 @@ def draw_detection_hud(
     objects: Optional[List[Dict[str, Any]]] = None,
     bbox: Optional[Tuple[int, int, int, int]] = None,
     next_check_in: Optional[float] = None,
+    alert_text: Optional[str] = None,
 ) -> np.ndarray:
     """
     วาด HUD แสดงผลสถานะการตรวจจับและการแจ้งเตือนบนเฟรมกล้อง
@@ -125,7 +126,8 @@ def draw_detection_hud(
     # กำหนดชุดสีตามสถานะ (BGR)
     if status == "Mask":
         theme_color = (0, 0, 230)      # สีแดง (เตือนใส่หน้ากาก)
-        status_text = "เตือน: ตรวจพบหน้ากากอนามัย (ถอดหน้ากากออกด้วยดิวะ)"
+        display_msg = alert_text if alert_text else "ตรวจพบหน้ากากอนามัย"
+        status_text = f"เตือน: {display_msg}"
         sub_text = "STATUS: MASK DETECTED"
         cv2.rectangle(frame, (0, 0), (w, h), theme_color, 8)
     elif status == "NoMask":

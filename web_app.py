@@ -1,7 +1,9 @@
 """
-Web Application: Realtime Face Mask Detection with AI for Thai
+Web Application: Realtime Face Mask Detection with AI for Thai & Thai LLM
 เปิดหน้าเว็บแสดงผลผ่านเบราว์เซอร์ (http://localhost:5000)
-พร้อม Video Streaming, ครอบตัดใบหน้าส่งตรวจทุก 5 วินาที, แสดงภาพที่แคป และเสียงเตือน VAJA
+- ตรวจจับหน้ากากอนามัยผ่าน AI for Thai (detectfacemask API)
+- เจนประโยคแจ้งเตือนอัตโนมัติผ่าน Thai LLM (หลากหลายบุคลิก: สุภาพ, กวนๆ, ครูฝ่ายปกครอง, หุ่นยนต์ AI)
+- สังเคราะห์เสียงพูดเตือนด้วย AI for Thai (VAJA TTS API)
 """
 
 import logging
@@ -19,11 +21,12 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import cv2
 import numpy as np
-from flask import Flask, Response, render_template_string, jsonify, send_file
+from flask import Flask, Response, render_template_string, jsonify, send_file, request
 
 from config import Config
 from mask_detector import MaskDetectionClient
 from tts_alert import VajaAlertService
+from thai_llm import thai_llm, ThaiLLMPersona, LOCAL_PERSONA_CORPUS
 from ui_overlay import draw_detection_hud
 
 logging.basicConfig(
@@ -79,7 +82,7 @@ def camera_loop():
 
     prev_time = time.time()
     last_check_time = time.time()
-    check_interval = 5.0  # 5.0 วินาทีตามที่ผู้ใช้กำหนด
+    check_interval = 5.0  # 5.0 วินาที
 
     while is_running:
         success, frame = cap.read()
@@ -118,7 +121,7 @@ def camera_loop():
 
         last_ago = (current_time - last_ts) if last_ts else None
 
-        # วาด HUD บนเฟรมกล้อง
+        # วาด HUD บนเฟรมกล้อง พร้อมแสดงข้อความเตือนจาก Thai LLM
         display_frame = frame.copy()
         annotated = draw_detection_hud(
             frame=display_frame,
@@ -130,6 +133,7 @@ def camera_loop():
             is_audio_playing=alert_service.is_playing,
             bbox=cur_bbox,
             next_check_in=remaining,
+            alert_text=alert_service.last_spoken_text,
         )
 
         with frame_lock:
@@ -171,10 +175,10 @@ def trigger_api_check(frame_to_check: np.ndarray):
                         f"ผลลัพธ์จาก AI for Thai: {state['status']} | คะแนน: {state['latest_score']}"
                     )
 
-                    # ถ้าผลเป็น Mask ให้แจ้งเตือนด้วยเสียง VAJA
+                    # ถ้าผลเป็น Mask ให้แจ้งเตือนด้วยเสียง VAJA TTS + Thai LLM
                     if result.get("should_alert"):
                         state["mask_count"] += 1
-                        logger.warning("ตรวจพบหน้ากากอนามัย! สั่งเล่นเสียงเตือน VAJA: 'ถอดหน้ากากออกด้วยดิวะ'")
+                        logger.warning("⚠️ ตรวจพบหน้ากากอนามัย! ให้ Thai LLM สร้างประโยคเตือนและสั่ง VAJA TTS พูด")
                         alert_service.trigger_alert_async()
                     else:
                         logger.info("ผลลัพธ์เป็น NoMask (ไม่ใส่หน้ากาก) -> ไม่ต้องแจ้งเตือน")
@@ -227,60 +231,145 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI for Thai - ตรวจจับหน้ากากอนามัย (Web Dashboard)</title>
+    <title>AI for Thai & Thai LLM - Realtime Face Mask Detection</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Kanit', sans-serif; }
     </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen">
+<body class="bg-slate-950 text-slate-100 min-h-screen pb-12">
     <!-- Navbar -->
-    <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+    <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50 shadow-md">
         <div class="flex items-center space-x-3">
             <span class="inline-block w-3.5 h-3.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <h1 class="text-xl font-bold tracking-wide">AI for Thai - ตรวจจับหน้ากากอนามัยเรียลไทม์</h1>
+            <div>
+                <h1 class="text-lg md:text-xl font-bold tracking-wide flex items-center gap-2">
+                    <span>AI for Thai</span>
+                    <span class="text-xs px-2 py-0.5 rounded bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 font-mono">+ Thai LLM</span>
+                    <span>ระบบตรวจจับหน้ากากอนามัยอัจฉริยะ</span>
+                </h1>
+                <p class="text-xs text-slate-400">ตรวจจับด้วย AI for Thai (detectfacemask) • เจนประโยคด้วย Thai LLM • สังเคราะห์เสียงด้วย VAJA TTS</p>
+            </div>
         </div>
-        <div class="flex items-center space-x-4 text-sm text-slate-400">
-            <span>แคปตรวจทุกๆ: <b class="text-indigo-400 font-semibold">5 วินาที</b></span>
-            <span>สถานะ: <b class="text-emerald-400">เชื่อมต่อแล้ว</b></span>
+        <div class="flex items-center space-x-3 text-xs md:text-sm">
+            <span class="px-3 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                รอบการตรวจ: <b class="text-indigo-400">5.0s</b>
+            </span>
+            <span class="px-3 py-1 rounded-full bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 font-medium">
+                ● ระบบพร้อมทำงาน
+            </span>
         </div>
     </header>
 
     <!-- Main Container -->
-    <main class="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Live Video Stream -->
-        <section class="lg:col-span-2 bg-slate-900 rounded-2xl border border-slate-800 p-4 shadow-xl flex flex-col items-center">
-            <div class="w-full flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
-                <span class="text-base font-semibold text-slate-200">📹 ภาพสดจากกล้อง Webcam</span>
-                <span id="badge-countdown" class="text-xs px-3 py-1 rounded-full font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    นับถอยหลัง: 5.0s
-                </span>
-            </div>
-            
-            <div class="relative w-full aspect-video bg-black rounded-xl overflow-hidden border border-slate-800 shadow-inner flex items-center justify-center">
-                <img src="/video_feed" alt="Webcam Feed" class="w-full h-full object-contain">
+    <main class="max-w-7xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Left: Live Video Stream & Quick Controls -->
+        <section class="lg:col-span-2 space-y-6">
+            <div class="bg-slate-900 rounded-2xl border border-slate-800 p-4 shadow-xl flex flex-col items-center">
+                <div class="w-full flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+                    <span class="text-base font-semibold text-slate-200 flex items-center gap-2">
+                        <span>📹</span> <span>ภาพสดจากกล้อง Webcam (พร้อม Thai HUD)</span>
+                    </span>
+                    <span id="badge-countdown" class="text-xs px-3 py-1 rounded-full font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                        นับถอยหลัง: 5.0s
+                    </span>
+                </div>
+                
+                <div class="relative w-full aspect-video bg-black rounded-xl overflow-hidden border border-slate-800 shadow-inner flex items-center justify-center">
+                    <img src="/video_feed" alt="Webcam Feed" class="w-full h-full object-contain">
+                </div>
+
+                <!-- Controls Toolbar -->
+                <div class="w-full mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex flex-wrap gap-2.5">
+                        <button onclick="triggerSnapshot()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-medium rounded-lg text-sm shadow transition flex items-center space-x-2">
+                            <span>📸</span>
+                            <span>แคปภาพตรวจทันที</span>
+                        </button>
+                        <button onclick="testAudio()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-medium rounded-lg text-sm border border-slate-700 transition flex items-center space-x-2">
+                            <span>🔊</span>
+                            <span>ทดสอบเสียงพูด (VAJA TTS)</span>
+                        </button>
+                    </div>
+                    
+                    <div id="audio-alert-banner" class="hidden text-sm font-semibold text-rose-400 animate-pulse bg-rose-950/40 px-3 py-1.5 rounded-lg border border-rose-800/50 flex items-center gap-2">
+                        <span>📢</span>
+                        <span>กำลังเปล่งเสียงเตือนผ่านลำโพง...</span>
+                    </div>
+                </div>
             </div>
 
-            <!-- Controls -->
-            <div class="w-full mt-4 flex flex-wrap items-center justify-between gap-3">
-                <div class="flex space-x-3">
-                    <button onclick="triggerSnapshot()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-medium rounded-lg text-sm shadow transition flex items-center space-x-2">
-                        <span>📸</span>
-                        <span>แคปภาพตรวจทันที</span>
-                    </button>
-                    <button onclick="testAudio()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-medium rounded-lg text-sm border border-slate-700 transition flex items-center space-x-2">
-                        <span>🔊</span>
-                        <span>ทดสอบเสียงเตือน VAJA</span>
-                    </button>
+            <!-- Thai LLM Dynamic Alert Assistant Box (Feature Highlight) -->
+            <div class="bg-gradient-to-br from-slate-900 via-indigo-950/30 to-slate-900 rounded-2xl border-2 border-indigo-500/40 p-6 shadow-2xl space-y-5">
+                <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-indigo-500/20">
+                    <div class="flex items-center space-x-3">
+                        <span class="text-2xl">🧠</span>
+                        <div>
+                            <h2 class="text-base font-bold text-indigo-300 flex items-center gap-2">
+                                <span>Thai LLM อัจฉริยะ (Dynamic Alert Assistant)</span>
+                                <span class="text-[10px] uppercase px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono">LLM Powered</span>
+                            </h2>
+                            <p class="text-xs text-slate-400">สร้างประโยคเตือนภาษาไทยอัตโนมัติหลากหลายบุคลิก ส่งเข้า VAJA TTS</p>
+                        </div>
+                    </div>
+                    <label class="flex items-center cursor-pointer space-x-2">
+                        <input type="checkbox" id="toggle-dynamic-llm" onchange="toggleLLM(this.checked)" class="sr-only peer" checked>
+                        <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        <span class="text-xs font-medium text-slate-300">เปิดใช้ Thai LLM</span>
+                    </label>
                 </div>
-                <div id="audio-alert-banner" class="hidden text-sm font-semibold text-rose-400 animate-bounce">
-                    📢 กำลังส่งเสียงเตือน: "ถอดหน้ากากออกด้วยดิวะ"
+
+                <!-- Persona Switcher Buttons -->
+                <div>
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">เลือกบุคลิกของ Thai LLM (Persona):</span>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        <button onclick="setPersona('funny')" id="btn-persona-funny" class="persona-btn p-3 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-left transition flex flex-col justify-between">
+                            <span class="text-xl mb-1">🎭</span>
+                            <span class="text-xs font-bold text-slate-200">โหมดกวนๆ</span>
+                            <span class="text-[10px] text-slate-400">เป็นกันเอง แซวขำๆ</span>
+                        </button>
+                        <button onclick="setPersona('polite')" id="btn-persona-polite" class="persona-btn p-3 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-left transition flex flex-col justify-between">
+                            <span class="text-xl mb-1">🌸</span>
+                            <span class="text-xs font-bold text-slate-200">โหมดสุภาพ</span>
+                            <span class="text-[10px] text-slate-400">นอบน้อม ไพเราะ</span>
+                        </button>
+                        <button onclick="setPersona('teacher')" id="btn-persona-teacher" class="persona-btn p-3 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-left transition flex flex-col justify-between">
+                            <span class="text-xl mb-1">🧑‍🏫</span>
+                            <span class="text-xs font-bold text-slate-200">ครูฝ่ายปกครอง</span>
+                            <span class="text-[10px] text-slate-400">ดุดัน เข้มงวด</span>
+                        </button>
+                        <button onclick="setPersona('cyber')" id="btn-persona-cyber" class="persona-btn p-3 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-left transition flex flex-col justify-between">
+                            <span class="text-xl mb-1">🤖</span>
+                            <span class="text-xs font-bold text-slate-200">หุ่นยนต์ AI</span>
+                            <span class="text-[10px] text-slate-400">ไฮเทค ล้ำสมัย</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Current Sentence Display Box -->
+                <div class="bg-slate-950/80 rounded-xl border border-indigo-500/30 p-4 space-y-2">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-slate-400 font-medium">💬 ประโยคแจ้งเตือนปัจจุบัน (ส่งพูดผ่าน VAJA):</span>
+                        <span id="llm-source-badge" class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-900/60 text-indigo-300 border border-indigo-700/50">
+                            Thai LLM
+                        </span>
+                    </div>
+                    <div id="llm-spoken-text" class="text-lg font-semibold text-amber-300 italic py-1">
+                        "กำลังโหลดประโยค..."
+                    </div>
+                    <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-850">
+                        <button onclick="generateNewSentence()" class="px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 rounded-lg text-xs font-medium border border-indigo-500/40 transition flex items-center space-x-1.5 active:scale-95">
+                            <span>🎲</span>
+                            <span>สุ่มประโยคใหม่ทันที</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
 
-        <!-- Status & Stats Card -->
+        <!-- Right: Status, Face Preview & Stats -->
         <section class="space-y-6">
             <!-- Detection Status Card -->
             <div id="status-card" class="bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-xl transition-all">
@@ -300,7 +389,7 @@ HTML_TEMPLATE = """
             <div class="bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-xl space-y-3">
                 <div class="flex justify-between items-center">
                     <h3 class="text-xs uppercase tracking-wider text-slate-400 font-semibold">ภาพใบหน้าที่ส่ง API ล่าสุด</h3>
-                    <span class="text-xs text-indigo-400 font-medium">Cropped Face</span>
+                    <span class="text-xs text-indigo-400 font-medium">Cropped Face (AI for Thai)</span>
                 </div>
                 <div class="w-full h-44 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
                     <img id="last-face-img" src="/last_face.jpg?t=0" alt="Last Captured Face" class="h-full object-contain">
@@ -312,27 +401,31 @@ HTML_TEMPLATE = """
 
             <!-- Dashboard Stats -->
             <div class="bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-xl space-y-4">
-                <h3 class="text-xs uppercase tracking-wider text-slate-400 font-semibold">ข้อมูลการทำงาน</h3>
+                <h3 class="text-xs uppercase tracking-wider text-slate-400 font-semibold">ข้อมูลการทำงานและสถิติ</h3>
                 
                 <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-slate-950 p-4 rounded-xl border border-slate-850">
+                    <div class="bg-slate-950 p-4 rounded-xl border border-slate-800">
                         <span class="text-xs text-slate-500">เฟรมเรตกล้อง (FPS)</span>
                         <div id="stat-fps" class="text-2xl font-bold text-slate-200">0.0</div>
                     </div>
-                    <div class="bg-slate-950 p-4 rounded-xl border border-slate-850">
-                        <span class="text-xs text-slate-500">จำนวนครั้งที่ตรวจพบหน้ากาก</span>
+                    <div class="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <span class="text-xs text-slate-500">ตรวจพบหน้ากากอนามัย</span>
                         <div id="stat-masks" class="text-2xl font-bold text-rose-400">0 ครั้ง</div>
                     </div>
                 </div>
 
                 <div class="pt-3 border-t border-slate-800 space-y-2 text-xs text-slate-400">
                     <div class="flex justify-between">
-                        <span>API ตรวจจับ:</span>
-                        <span class="text-slate-300">detectfacemask</span>
+                        <span>บริการ Vision:</span>
+                        <span class="text-slate-300 font-medium">AI for Thai (detectfacemask)</span>
                     </div>
                     <div class="flex justify-between">
-                        <span>API เสียงพูด:</span>
-                        <span class="text-slate-300">VAJA (nana)</span>
+                        <span>บริการ Text/LLM:</span>
+                        <span class="text-indigo-400 font-medium">Thai LLM (Dynamic Persona)</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>บริการ Speech:</span>
+                        <span class="text-slate-300 font-medium">AI for Thai (VAJA TTS)</span>
                     </div>
                     <div class="flex justify-between">
                         <span>ตรวจล่าสุด:</span>
@@ -344,6 +437,69 @@ HTML_TEMPLATE = """
     </main>
 
     <script>
+        let currentActivePersona = 'funny';
+
+        function updatePersonaHighlight(persona) {
+            currentActivePersona = persona;
+            const personas = ['funny', 'polite', 'teacher', 'cyber'];
+            personas.forEach(p => {
+                const btn = document.getElementById('btn-persona-' + p);
+                if (btn) {
+                    if (p === persona) {
+                        btn.className = 'persona-btn p-3 rounded-xl border-2 border-indigo-400 bg-indigo-950/60 shadow-lg text-left transition flex flex-col justify-between ring-2 ring-indigo-500/30';
+                    } else {
+                        btn.className = 'persona-btn p-3 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-left transition flex flex-col justify-between';
+                    }
+                }
+            });
+        }
+
+        async function setPersona(persona) {
+            updatePersonaHighlight(persona);
+            try {
+                const res = await fetch('/api/set_persona', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ persona: persona })
+                });
+                const data = await res.json();
+                if (data.success && data.text) {
+                    document.getElementById('llm-spoken-text').innerText = '"' + data.text + '"';
+                    document.getElementById('llm-source-badge').innerText = data.source || 'Thai LLM';
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function toggleLLM(enabled) {
+            try {
+                await fetch('/api/toggle_llm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enable: enabled })
+                });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function generateNewSentence() {
+            try {
+                const btn = event?.currentTarget;
+                if (btn) btn.classList.add('animate-spin');
+                const res = await fetch('/api/generate_sentence', { method: 'POST' });
+                const data = await res.json();
+                if (data.success && data.text) {
+                    document.getElementById('llm-spoken-text').innerText = '"' + data.text + '"';
+                    document.getElementById('llm-source-badge').innerText = data.source || 'Thai LLM';
+                }
+                if (btn) btn.classList.remove('animate-spin');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
@@ -355,10 +511,26 @@ HTML_TEMPLATE = """
                 const badgeCountdown = document.getElementById('badge-countdown');
                 const scoreBadge = document.getElementById('score-badge');
                 const audioBanner = document.getElementById('audio-alert-banner');
+                const spokenText = document.getElementById('llm-spoken-text');
+                const sourceBadge = document.getElementById('llm-source-badge');
+                const toggleLlm = document.getElementById('toggle-dynamic-llm');
 
                 document.getElementById('stat-fps').innerText = data.fps.toFixed(1);
                 document.getElementById('stat-masks').innerText = data.mask_count + ' ครั้ง';
                 document.getElementById('stat-last-time').innerText = data.last_check_ago !== null ? data.last_check_ago.toFixed(1) + 's ที่แล้ว' : 'ยังไม่เคย';
+
+                if (data.last_spoken_text) {
+                    spokenText.innerText = '"' + data.last_spoken_text + '"';
+                }
+                if (data.last_sentence_source) {
+                    sourceBadge.innerText = data.last_sentence_source;
+                }
+                if (toggleLlm && toggleLlm.checked !== data.enable_dynamic_llm) {
+                    toggleLlm.checked = data.enable_dynamic_llm;
+                }
+                if (data.current_persona && data.current_persona !== currentActivePersona) {
+                    updatePersonaHighlight(data.current_persona);
+                }
 
                 if (data.is_api_busy) {
                     badgeCountdown.innerText = "⏳ กำลังส่ง API วิเคราะห์...";
@@ -382,7 +554,7 @@ HTML_TEMPLATE = """
                     statusCard.className = "bg-rose-950/40 rounded-2xl border-2 border-rose-500 p-6 shadow-2xl transition-all";
                     statusText.className = "text-3xl font-extrabold text-rose-400";
                     statusText.innerText = "ตรวจพบหน้ากากอนามัย ⚠️";
-                    statusDesc.innerText = "ตรวจพบการใส่หน้ากากอนามัย (ส่งเสียงเตือนแล้ว)";
+                    statusDesc.innerText = "ตรวจพบการใส่หน้ากากอนามัย (ส่งเสียงเตือนผ่าน VAJA TTS แล้ว)";
                 } else if (data.status === 'NoMask') {
                     statusCard.className = "bg-emerald-950/30 rounded-2xl border-2 border-emerald-500/70 p-6 shadow-xl transition-all";
                     statusText.className = "text-3xl font-bold text-emerald-400";
@@ -417,8 +589,10 @@ HTML_TEMPLATE = """
 
         async function testAudio() {
             await fetch('/api/test_audio', { method: 'POST' });
+            fetchStatus();
         }
 
+        updatePersonaHighlight('funny');
         setInterval(fetchStatus, 600);
         fetchStatus();
     </script>
@@ -469,7 +643,49 @@ def api_status():
             "total_checks": state["total_checks"],
             "mask_count": state["mask_count"],
             "latest_score": state["latest_score"],
+            "last_spoken_text": alert_service.last_spoken_text,
+            "last_sentence_source": alert_service.last_sentence_source,
+            "current_persona": thai_llm.current_persona,
+            "enable_dynamic_llm": Config.ENABLE_DYNAMIC_LLM_ALERT,
         })
+
+
+@app.route("/api/set_persona", methods=["POST"])
+def api_set_persona():
+    data = request.get_json(silent=True) or {}
+    persona = data.get("persona", ThaiLLMPersona.FUNNY)
+    thai_llm.set_persona(persona)
+    # เจนประโยคตัวอย่างของ persona ทันที
+    gen = thai_llm.generate_alert_sentence(persona)
+    alert_service.last_spoken_text = gen["text"]
+    alert_service.last_sentence_source = gen.get("source", "Thai LLM")
+    return jsonify({
+        "success": True,
+        "persona": persona,
+        "text": gen["text"],
+        "source": gen.get("source", "Thai LLM"),
+    })
+
+
+@app.route("/api/toggle_llm", methods=["POST"])
+def api_toggle_llm():
+    data = request.get_json(silent=True) or {}
+    enable = data.get("enable", True)
+    Config.ENABLE_DYNAMIC_LLM_ALERT = bool(enable)
+    return jsonify({"success": True, "enable": Config.ENABLE_DYNAMIC_LLM_ALERT})
+
+
+@app.route("/api/generate_sentence", methods=["POST"])
+def api_generate_sentence():
+    gen = thai_llm.generate_alert_sentence()
+    alert_service.last_spoken_text = gen["text"]
+    alert_service.last_sentence_source = gen.get("source", "Thai LLM")
+    return jsonify({
+        "success": True,
+        "text": gen["text"],
+        "source": gen.get("source", "Thai LLM"),
+        "persona": thai_llm.current_persona,
+    })
 
 
 @app.route("/api/check_now", methods=["POST"])
@@ -484,8 +700,14 @@ def api_check_now():
 
 @app.route("/api/test_audio", methods=["POST"])
 def api_test_audio():
-    success = alert_service.trigger_alert_async()
-    return jsonify({"success": success})
+    data = request.get_json(silent=True) or {}
+    custom_text = data.get("text")
+    success = alert_service.trigger_alert_async(custom_text=custom_text)
+    return jsonify({
+        "success": success,
+        "text": alert_service.last_spoken_text,
+        "source": alert_service.last_sentence_source,
+    })
 
 
 if __name__ == "__main__":

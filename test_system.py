@@ -18,6 +18,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from config import Config
 from mask_detector import MaskDetectionClient
 from tts_alert import VajaAlertService
+from thai_llm import thai_llm, ThaiLLMPersona, LOCAL_PERSONA_CORPUS
 from ui_overlay import draw_detection_hud, HAS_PIL
 
 
@@ -135,14 +136,35 @@ def test_ui_overlay():
     print("  -> UI Overlay Test ผ่านเรียบร้อย ✅\n")
 
 
+def test_thai_llm():
+    print("[5] ทดสอบ Thai LLM Module:")
+    for persona in [
+        ThaiLLMPersona.POLITE,
+        ThaiLLMPersona.FUNNY,
+        ThaiLLMPersona.TEACHER,
+        ThaiLLMPersona.CYBER,
+    ]:
+        gen = thai_llm.generate_alert_sentence(persona)
+        assert gen["text"] is not None and len(gen["text"]) > 0
+        assert gen["persona"] == persona
+        print(f"  - ทดสอบ Persona '{persona}': \"{gen['text']}\" ({gen['source']}) ✅")
+
+    # ทดสอบการเปลี่ยน Persona
+    thai_llm.set_persona(ThaiLLMPersona.TEACHER)
+    assert thai_llm.current_persona == ThaiLLMPersona.TEACHER
+    print("  - ตรวจสอบการเปลี่ยน Persona เป็น Teacher สำเร็จ ✅")
+    print("  -> Thai LLM Unit Test ผ่านเรียบร้อย ✅\n")
+
+
 if __name__ == "__main__":
     print("=" * 65)
-    print("เริ่มต้นการทดสอบระบบ Face Mask Detection System (AI for Thai)")
+    print("เริ่มต้นการทดสอบระบบ Face Mask Detection System (AI for Thai & Thai LLM)")
     print("=" * 65)
     test_config()
     test_mask_detector()
     test_tts_alert()
     test_ui_overlay()
+    test_thai_llm()
     print("=" * 65)
     print("🎉 ผลการทดสอบทุกโมดูล: ผ่านทั้งหมด 100% (ALL TESTS PASSED)")
     print("=" * 65)

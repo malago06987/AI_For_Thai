@@ -14,13 +14,15 @@ from pathlib import Path
 from typing import Optional, Tuple
 import requests
 
+import hashlib
 from config import Config
+from thai_llm import thai_llm
 
 logger = logging.getLogger(__name__)
 
 
 class VajaAlertService:
-    """ระบบแจ้งเตือนด้วยเสียงผ่าน VAJA API ของ AI for Thai"""
+    """ระบบแจ้งเตือนด้วยเสียงผ่าน VAJA API ของ AI for Thai พร้อมเชื่อมต่อ Thai LLM"""
 
     def __init__(
         self,
@@ -42,11 +44,8 @@ class VajaAlertService:
         self._lock = threading.Lock()
         self._is_playing = False
         self._last_alert_time = 0.0
-
-        # ใช้ hash ของข้อความในชื่อไฟล์ เพื่อให้เปลี่ยนข้อความใน .env แล้วดึงเสียงใหม่จาก API ทันที
-        import hashlib
-        text_hash = hashlib.md5(self.text.encode("utf-8")).hexdigest()[:8]
-        self._cached_audio_path = self.cache_dir / f"vaja_{self.speaker}_{text_hash}.wav"
+        self.last_spoken_text = self.text
+        self.last_sentence_source = "Default"
 
         # เตรียม pygame.mixer
         self._init_pygame_mixer()
@@ -62,10 +61,12 @@ class VajaAlertService:
             logger.warning(f"ไม่สามารถเริ่มการทำงานของ pygame.mixer ได้: {e}")
             return False
 
-    def trigger_alert_async(self) -> bool:
+    def trigger_alert_async(self, custom_text: Optional[str] = None) -> bool:
         """
         ส่งคำสั่งเล่นเสียงเตือนใน Background Thread
-        คืนค่า True หากรับคำสั่งสำเร็จ, False หากติด Cooldown หรือกำลังเล่นเสียงอยู่
+        - หากกำหนด custom_text จะใช้ข้อความนั้น
+        - หากไม่กำหนด และเปิด ENABLE_DYNAMIC_LLM_ALERT จะให้ Thai LLM สร้างประโยคเตือนแบบไดนามิก
+        - คืนค่า True หากรับคำสั่งสำเร็จ, False หากติด Cooldown หรือกำลังเล่นเสียงอยู่
         """
         current_time = time.time()
 
@@ -77,12 +78,29 @@ class VajaAlertService:
         if (current_time - self._last_alert_time) < self.cooldown_seconds:
             return False
 
+        # คัดเลือกข้อความที่จะพูด
+        if custom_text and custom_text.strip():
+            text_to_speak = custom_text.strip()
+            self.last_sentence_source = "Custom"
+        elif Config.ENABLE_DYNAMIC_LLM_ALERT:
+            gen_result = thai_llm.generate_alert_sentence()
+            text_to_speak = gen_result["text"]
+            self.last_sentence_source = gen_result.get("source", "Thai LLM")
+        else:
+            text_to_speak = self.text
+            self.last_sentence_source = "Default"
+
+        self.last_spoken_text = text_to_speak
+        logger.info(f"🎙️ ประโยคเตือนที่จะเล่น ({self.last_sentence_source}): '{text_to_speak}'")
+
         # เริ่มเธรดสำหรับเล่นเสียง
-        thread = threading.Thread(target=self._play_alert_worker, daemon=True)
+        thread = threading.Thread(
+            target=self._play_alert_worker, args=(text_to_speak,), daemon=True
+        )
         thread.start()
         return True
 
-    def _play_alert_worker(self):
+    def _play_alert_worker(self, text_to_speak: str):
         """Worker ภายใน Background Thread สำหรับดาวน์โหลดและเล่นเสียง"""
         with self._lock:
             if self._is_playing:
@@ -91,24 +109,28 @@ class VajaAlertService:
             self._last_alert_time = time.time()
 
         try:
-            audio_path = self._get_or_download_audio()
+            audio_path = self._get_or_download_audio(text_to_speak)
             if audio_path and os.path.exists(audio_path):
                 self._play_audio_file(audio_path)
             else:
-                logger.error("ไม่สามารถจัดเตรียมไฟล์เสียงเตือนได้")
+                logger.error(f"ไม่สามารถจัดเตรียมไฟล์เสียงเตือนสำหรับ: '{text_to_speak}'")
         except Exception as e:
             logger.error(f"เกิดข้อผิดพลาดในการเล่นเสียงเตือน: {e}")
         finally:
             self._is_playing = False
 
-    def _get_or_download_audio(self) -> Optional[str]:
+    def _get_or_download_audio(self, text_to_speak: str) -> Optional[str]:
         """
-        ดึงไฟล์เสียง: ถ้ามีไฟล์แคชที่ดาวน์โหลดไว้แล้วจะนำมาใช้ทันที
-        หากยังไม่มีจะเรียก VAJA API แล้วดาวน์โหลดจาก audio_url
+        ดึงไฟล์เสียง: ถ้ามีไฟล์แคชของข้อความนี้ที่ดาวน์โหลดไว้แล้วจะนำมาใช้ทันที (0ms)
+        หากยังไม่มีจะเรียก VAJA API ของ AI for Thai แล้วดาวน์โหลดบันทึกแคช
         """
+        # คำนวณ Hash ของข้อความเพื่อใช้เป็นชื่อไฟล์แคช
+        text_hash = hashlib.md5(text_to_speak.encode("utf-8")).hexdigest()[:8]
+        cached_audio_path = self.cache_dir / f"vaja_{self.speaker}_{text_hash}.wav"
+
         # ถ้าเปิดระบบแคชและมีไฟล์เดิมอยู่แล้ว ให้ใช้ไฟล์เดิมทันทีเพื่อความรวดเร็วและประหยัดโควตา
-        if Config.ENABLE_AUDIO_CACHE and self._cached_audio_path.exists() and self._cached_audio_path.stat().st_size > 0:
-            return str(self._cached_audio_path)
+        if Config.ENABLE_AUDIO_CACHE and cached_audio_path.exists() and cached_audio_path.stat().st_size > 0:
+            return str(cached_audio_path)
 
         # ตรวจสอบ API Key
         if not self.api_key or self.api_key in ("your_actual_api_key_here", "your_aiforthai_api_key_here"):
@@ -123,7 +145,7 @@ class VajaAlertService:
         try:
             # เรียก VAJA API: AI for Thai กำหนดให้ส่ง JSON payload: {"text": "...", "speaker": "..."}
             payload = {
-                "text": self.text,
+                "text": text_to_speak,
                 "speaker": self.speaker
             }
 
@@ -151,9 +173,9 @@ class VajaAlertService:
                     dl_resp = requests.get(audio_url, timeout=12.0)
 
                 if dl_resp.status_code == 200 and len(dl_resp.content) > 0:
-                    with open(self._cached_audio_path, "wb") as f:
+                    with open(cached_audio_path, "wb") as f:
                         f.write(dl_resp.content)
-                    return str(self._cached_audio_path)
+                    return str(cached_audio_path)
                 else:
                     logger.error(f"ดาวน์โหลดไฟล์เสียงจาก {audio_url} ล้มเหลว: {dl_resp.status_code}")
             except Exception as e:

@@ -77,7 +77,9 @@ class FaceMaskDetectionApp:
 
                     # ถ้าผลลัพธ์เป็น Mask ให้แจ้งเตือนด้วยเสียง VAJA
                     if result.get("should_alert"):
-                        logger.warning("ตรวจพบหน้ากากอนามัย! สั่งเล่นเสียงแจ้งเตือน: 'ถอดหน้ากากออกด้วยดิวะ'")
+                        logger.warning(
+                            f"ตรวจพบหน้ากากอนามัย! สั่งเล่นเสียงแจ้งเตือนผ่าน VAJA TTS + Thai LLM: '{self.alert_service.last_spoken_text}'"
+                        )
                         self.alert_service.trigger_alert_async()
                     else:
                         logger.info("ผลลัพธ์เป็น NoMask หรือไม่พบหน้ากาก -> ไม่ต้องแจ้งเตือน")
@@ -183,6 +185,7 @@ class FaceMaskDetectionApp:
                     last_check_ago=last_check_ago,
                     is_audio_playing=self.alert_service.is_playing,
                     objects=objs,
+                    alert_text=self.alert_service.last_spoken_text,
                 )
 
                 # แสดงภาพบนหน้าจอ
